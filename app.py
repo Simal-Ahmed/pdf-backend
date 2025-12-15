@@ -1,6 +1,7 @@
 import os
 import uuid
 import subprocess
+import platform
 from flask import Flask, request, send_file, jsonify
 from flask_cors import CORS
 
@@ -12,6 +13,8 @@ CORS(app)
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(COMPRESSED_FOLDER, exist_ok=True)
+
+GS_COMMAND = "gswin64c" if platform.system() == "Windows" else "gs"
 
 
 @app.route("/compress", methods=["POST"])
@@ -32,7 +35,8 @@ def compress_pdf():
     pdf_settings = {
         "screen": "/screen",
         "ebook": "/ebook",
-        "printer": "/printer"
+        "printer": "/printer",
+        "preserve": None
     }
 
     setting = pdf_settings.get(compression_level, "/ebook")
@@ -47,7 +51,7 @@ def compress_pdf():
 
     def run_gs(gs_setting=None, preserve_images=False):
         command = [
-            "gswin64c",
+            GS_COMMAND,
             "-sDEVICE=pdfwrite",
             "-dCompatibilityLevel=1.4",
             "-dNOPAUSE",
@@ -74,7 +78,10 @@ def compress_pdf():
         subprocess.run(command, check=True)
 
     try:
-        # Attempt 1: requested compression
+        # Attempt 1
+        if compression_level == "preserve":
+            raise Exception("Force preserve mode")
+
         run_gs(setting)
 
         with open(output_path, "rb") as f:
@@ -83,7 +90,7 @@ def compress_pdf():
 
     except Exception:
         try:
-            # Attempt 2: safer compression
+            # Attempt 2 (safe)
             run_gs("/printer")
 
             with open(output_path, "rb") as f:
@@ -91,7 +98,7 @@ def compress_pdf():
                     raise Exception("Invalid PDF")
 
         except Exception:
-            # Attempt 3: preserve images (LAST RESORT)
+            # Attempt 3 (preserve images)
             run_gs(preserve_images=True)
 
     try:
@@ -100,9 +107,8 @@ def compress_pdf():
             as_attachment=True,
             download_name="compressed.pdf"
         )
-        response.headers["X-Compression-Mode"] = "used"
+        response.headers["X-Compression-Mode"] = compression_level
         return response
-
 
     except Exception:
         return jsonify({"error": "Compression failed"}), 500
@@ -114,4 +120,3 @@ def compress_pdf():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
-
