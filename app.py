@@ -90,7 +90,7 @@ def compress_pdf():
 
     except Exception:
         try:
-            # Attempt 2 (safe)
+            # Attempt 2
             run_gs("/printer")
 
             with open(output_path, "rb") as f:
@@ -98,20 +98,30 @@ def compress_pdf():
                     raise Exception("Invalid PDF")
 
         except Exception:
-            # Attempt 3 (preserve images)
+            # Attempt 3
             run_gs(preserve_images=True)
 
     try:
-        response = send_file(
+        # Final validation
+        if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+            raise Exception("Invalid output")
+
+        with open(output_path, "rb") as f:
+            if f.read(4) != b"%PDF":
+                raise Exception("Corrupt output")
+
+        return send_file(
             output_path,
             as_attachment=True,
             download_name="compressed.pdf"
         )
-        response.headers["X-Compression-Mode"] = compression_level
-        return response
 
     except Exception:
-        return jsonify({"error": "Compression failed"}), 500
+        return send_file(
+            input_path,
+            as_attachment=True,
+            download_name="original.pdf"
+        )
 
     finally:
         if os.path.exists(input_path):
