@@ -32,15 +32,6 @@ def compress_pdf():
 
     compression_level = request.form.get("level", "ebook")
 
-    pdf_settings = {
-        "screen": "/screen",
-        "ebook": "/ebook",
-        "printer": "/printer",
-        "preserve": None
-    }
-
-    setting = pdf_settings.get(compression_level, "/ebook")
-
     input_filename = f"{uuid.uuid4()}.pdf"
     output_filename = f"{uuid.uuid4()}_compressed.pdf"
 
@@ -49,66 +40,36 @@ def compress_pdf():
 
     file.save(input_path)
 
-    def run_gs(gs_setting=None, preserve_images=False):
+    # ✅ PRESERVE MODE: DO NOT TOUCH THE PDF
+    if compression_level == "preserve":
+        return send_file(
+            input_path,
+            as_attachment=True,
+            download_name="original.pdf"
+        )
+
+    def run_gs(pdf_setting):
         command = [
             GS_COMMAND,
             "-sDEVICE=pdfwrite",
             "-dCompatibilityLevel=1.4",
+            f"-dPDFSETTINGS={pdf_setting}",
             "-dNOPAUSE",
             "-dQUIET",
             "-dBATCH",
-        ]
-
-        if preserve_images:
-            command.extend([
-                "-dDownsampleColorImages=false",
-                "-dDownsampleGrayImages=false",
-                "-dDownsampleMonoImages=false",
-                "-dAutoFilterColorImages=false",
-                "-dAutoFilterGrayImages=false"
-            ])
-        else:
-            command.append(f"-dPDFSETTINGS={gs_setting}")
-
-        command.extend([
             f"-sOutputFile={output_path}",
             input_path
-        ])
-
+        ]
         subprocess.run(command, check=True)
 
     try:
-        # Attempt 1
-        if compression_level == "preserve":
-            raise Exception("Force preserve mode")
+        # Attempt compression
+        run_gs("/ebook" if compression_level not in ["screen", "printer"] else f"/{compression_level}")
 
-        run_gs(setting)
-
+        # Validate output
         with open(output_path, "rb") as f:
             if f.read(4) != b"%PDF":
                 raise Exception("Invalid PDF")
-
-    except Exception:
-        try:
-            # Attempt 2
-            run_gs("/printer")
-
-            with open(output_path, "rb") as f:
-                if f.read(4) != b"%PDF":
-                    raise Exception("Invalid PDF")
-
-        except Exception:
-            # Attempt 3
-            run_gs(preserve_images=True)
-
-    try:
-        # Final validation
-        if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
-            raise Exception("Invalid output")
-
-        with open(output_path, "rb") as f:
-            if f.read(4) != b"%PDF":
-                raise Exception("Corrupt output")
 
         return send_file(
             output_path,
@@ -117,6 +78,7 @@ def compress_pdf():
         )
 
     except Exception:
+        # ❗ If compression fails → return original safely
         return send_file(
             input_path,
             as_attachment=True,
